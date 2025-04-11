@@ -1,3 +1,4 @@
+use serde::Serialize;
 use validator::{Validate, ValidationErrors};
 
 fn main() {
@@ -40,6 +41,66 @@ struct RegisterUserRequest {
     name: String,
     #[validate(nested)]
     address: AddressRequest,
+}
+
+#[derive(Debug, Validate)]
+struct Product {
+    #[validate(length(min = 3, max = 200))]
+    id: String,
+    #[validate(length(min = 3, max = 200))]
+    name: String,
+    #[validate(nested, length(min =1))]
+    variants: Vec<ProductVariant>,
+}
+
+#[derive(Debug, Validate, Serialize)]
+struct ProductVariant {
+    #[validate(length(min = 3, max = 100))]
+    name: String,
+    #[validate(range(min = 12, max = 100000000))]
+    price: i32,
+}
+
+#[test]
+fn test_validate_vector_success() {
+    let request = Product{
+        id: "product-1".to_string(),
+        name: "product-1".to_string(),
+        variants: vec![
+            ProductVariant{
+                name: "variant-1".to_string(),
+                price: 1000
+            },
+            ProductVariant{
+                name: "variant-2".to_string(),
+                price: 2000
+            },
+        ]
+    };
+
+    assert!(request.validate().is_ok());
+}
+
+#[test]
+fn test_validate_vector_error() {
+    let request = Product{
+        id: "product-1".to_string(),
+        name: "product-1".to_string(),
+        variants: vec![
+            ProductVariant{
+                name: "".to_string(),
+                price: -1000
+            },
+            ProductVariant{
+                name: "".to_string(),
+                price: -2000
+            },
+        ]
+    };
+
+    assert!(request.validate().is_err());
+    let error = request.validate().err().unwrap();
+    println!("{:?}", error.errors());
 }
 
 #[test]
