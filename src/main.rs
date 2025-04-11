@@ -1,9 +1,9 @@
 use serde::Serialize;
-use validator::{Validate, ValidationErrors};
+use validator::{Validate, ValidateArgs, ValidationErrors};
 
 pub mod pzn {
     pub mod validator {
-        use crate::RegisterUserRequest;
+        use crate::{DatabaseContext, RegisterUserRequest};
         use std::borrow::Cow;
         use validator::ValidationError;
 
@@ -26,7 +26,28 @@ pub mod pzn {
 
             Ok(())
         }
+
+        pub fn can_register(
+            request: &RegisterUserRequest,
+            context: &DatabaseContext,
+        ) -> Result<(), ValidationError> {
+            if context.total >= context.max_data {
+                return Err(
+                    ValidationError::new("can_register").with_message(Cow::from(format!(
+                        "cannot register user {}, database is full",
+                        request.username
+                    ))),
+                );
+            }
+
+            Ok(())
+        }
     }
+}
+
+pub struct DatabaseContext {
+    total: i32,
+    max_data: i32,
 }
 
 #[derive(Debug, Validate, Serialize)]
@@ -68,18 +89,28 @@ struct AddressRequest {
 }
 
 #[derive(Debug, Validate)]
-#[validate(schema(
-    function = "pzn::validator::password_equals_confirm_password",
-    skip_on_field_errors = false
-))]
+#[validate(context= DatabaseContext,
+    schema(
+        function = "pzn::validator::password_equals_confirm_password",
+        skip_on_field_errors = false,
+        code = "password",
+        message = "password != confirm password"
+    ),
+    schema(
+        function = "crate::pzn::validator::can_register",
+        skip_on_field_errors = false,
+        code = "username",
+        use_context
+    )
+)]
 pub struct RegisterUserRequest {
-    #[validate(length(min = 3, max = 20))]
+    #[validate(length(min = 3, max = 20, code = "username"))]
     username: String,
-    #[validate(length(min = 3, max = 20))]
+    #[validate(length(min = 3, max = 20, code = "password"))]
     password: String,
-    #[validate(length(min = 3, max = 20))]
+    #[validate(length(min = 3, max = 20, code = "confirm_password"))]
     confirm_password: String,
-    #[validate(length(min = 3, max = 100))]
+    #[validate(length(min = 3, max = 100, code = "name"))]
     name: String,
     #[validate(nested)]
     address: AddressRequest,
@@ -170,16 +201,21 @@ fn test_nested_struct_success() {
         },
     };
 
-    assert!(request.validate().is_ok());
+    let context = DatabaseContext{
+        total: 100,
+        max_data: 1000,
+    };
+
+    assert!(request.validate_with_args(&context).is_ok());
 }
 
 #[test]
 fn test_nested_struct_error() {
     let request = RegisterUserRequest {
-        username: "ekoatro".to_string(),
+        username: "o".to_string(),
         password: "passwortaro".to_string(),
         confirm_password: "salah".to_string(),
-        name: "ekotaro".to_string(),
+        name: "".to_string(),
         address: AddressRequest {
             street: "".to_string(),
             city: "".to_string(),
@@ -187,9 +223,14 @@ fn test_nested_struct_error() {
         },
     };
 
-    assert!(request.validate().is_err());
+    let context = DatabaseContext{
+        total: 100,
+        max_data: 100,
+    };
 
-    let errors: ValidationErrors = request.validate().err().unwrap();
+    assert!(request.validate_with_args(&context).is_err());
+
+    let errors: ValidationErrors = request.validate_with_args(&context).err().unwrap();
     println!("{:#?}", errors.errors());
 }
 
